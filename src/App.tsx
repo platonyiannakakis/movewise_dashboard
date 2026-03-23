@@ -796,6 +796,182 @@ function ActionPlanView() {
         </div>
       </div>
 
+      {/* Burn chart — action plan projection */}
+      <div style={{ ...cardS, marginBottom: 12 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+          <span style={{ fontFamily: serif, fontSize: 18 }}>
+            Projected <em>Burn</em>
+          </span>
+          <div style={{ display: "flex", gap: 14, fontSize: 10 }}>
+            {[[P.green, "Actual (frozen)"], [viable ? P.green : P.red, "Action plan"], [P.gold, "€25k cap"]].map(([c, l]) => (
+              <span key={l} style={{ display: "flex", alignItems: "center", gap: 4, color: P.creamDim }}>
+                <span style={{ width: 10, height: 3, borderRadius: 1, background: c, display: "inline-block" }} />{l}
+              </span>
+            ))}
+          </div>
+        </div>
+        {(() => {
+          const cW = 560, cH = 180, pL = 46, pR = 16, pT = 20, pB = 28;
+          const planColor = viable ? P.green : P.red;
+          const maxV = Math.max(total * 1.14, CAP * 1.14);
+          const xS = w => pL + (w / WKS) * (cW - pL - pR);
+          const yS = v => pT + (1 - Math.min(v, maxV) / maxV) * (cH - pT - pB);
+          const mkL = pts => pts.map((p, i) => `${i === 0 ? "M" : "L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
+          const wks = Array.from({ length: WKS + 1 }, (_, i) => i);
+          // Historical: Wk0–5, slope = confirmed / 5
+          const histSlope = CONFIRMED_SPEND / NOW;
+          const histPts = wks.filter(w => w <= NOW).map(w => ({ x: xS(w), y: yS(histSlope * w) }));
+          // Action plan: Wk5–12, starts at confirmed, adds proposed evenly over 7 weeks
+          const planWeekly = proposed > 0 ? proposed / (WKS - NOW) : 0;
+          const planPts = wks.filter(w => w >= NOW).map(w => ({
+            x: xS(w), y: yS(CONFIRMED_SPEND + planWeekly * (w - NOW))
+          }));
+          const endPt = planPts[planPts.length - 1];
+          return (
+            <svg viewBox={`0 0 ${cW} ${cH}`} style={{ width: "100%", height: "auto" }}>
+              {/* Safe zone shading below cap */}
+              <rect x={pL} y={yS(CAP)} width={cW - pL - pR} height={cH - pB - yS(CAP)}
+                fill="rgba(122,170,106,0.04)" />
+              {/* Grid lines */}
+              {[0, 5000, 10000, 15000, 20000, 25000, 30000].filter(v => v <= maxV).map(v => (
+                <g key={v}>
+                  <line x1={pL} x2={cW - pR} y1={yS(v)} y2={yS(v)} stroke="rgba(185,174,147,0.07)" strokeWidth={0.5} />
+                  <text x={pL - 5} y={yS(v) + 3} textAnchor="end" fontSize={8} fill={P.creamDim} fontFamily={sans}>
+                    €{(v / 1000).toFixed(0)}k
+                  </text>
+                </g>
+              ))}
+              {/* Week labels */}
+              {wks.filter(w => w % 2 === 0 || w === NOW).map(w => (
+                <text key={w} x={xS(w)} y={cH - 8} textAnchor="middle" fontSize={8}
+                  fill={w === NOW ? P.gold : P.creamDim} fontFamily={sans} fontWeight={w === NOW ? 700 : 400}>
+                  W{w}
+                </text>
+              ))}
+              {/* Cap line */}
+              <line x1={pL} x2={cW - pR} y1={yS(CAP)} y2={yS(CAP)}
+                stroke={P.gold} strokeWidth={1.5} strokeDasharray="6,3" opacity={0.6} />
+              <text x={cW - pR - 2} y={yS(CAP) - 4} textAnchor="end" fontSize={8} fill={P.gold} fontFamily={sans}>€25k</text>
+              {/* NOW marker */}
+              <line x1={xS(NOW)} x2={xS(NOW)} y1={pT} y2={cH - pB}
+                stroke="rgba(185,174,147,0.18)" strokeWidth={1} strokeDasharray="3,3" />
+              <text x={xS(NOW)} y={pT - 5} textAnchor="middle" fontSize={9} fill={P.gold} fontFamily={serif} fontWeight={700}>NOW</text>
+              {/* Historical actual line */}
+              <path d={mkL(histPts)} fill="none" stroke={P.green} strokeWidth={2.5} />
+              {histPts.map((p, i) => (
+                <circle key={i} cx={p.x} cy={p.y} r={i === histPts.length - 1 ? 4 : 2.5}
+                  fill={P.green} stroke={P.dark} strokeWidth={1} />
+              ))}
+              {/* Action plan projection line */}
+              {proposed > 0 ? (
+                <>
+                  <path d={mkL(planPts)} fill="none" stroke={planColor} strokeWidth={2} strokeDasharray="6,3" opacity={0.85} />
+                  <circle cx={endPt.x} cy={endPt.y} r={4} fill={planColor} stroke={P.dark} strokeWidth={1} />
+                  <text x={endPt.x - 6} y={endPt.y - 8} textAnchor="end" fontSize={9}
+                    fill={planColor} fontFamily={serif} fontWeight={700}>
+                    €{Math.round(total).toLocaleString()}
+                  </text>
+                  {/* Health label */}
+                  <rect x={pL + 6} y={pT + 2} width={viable ? 88 : 96} height={16} rx={3}
+                    fill={viable ? hr(P.green, 0.15) : hr(P.red, 0.15)} />
+                  <text x={pL + 10} y={pT + 13} fontSize={9} fill={viable ? P.green : P.red}
+                    fontFamily={sans} fontWeight={700}>
+                    {viable
+                      ? `✓ Within cap — €${Math.round(headroom).toLocaleString()} headroom`
+                      : `✗ Over cap by €${Math.round(-headroom).toLocaleString()}`}
+                  </text>
+                </>
+              ) : (
+                <text x={(pL + cW - pR) / 2} y={cH / 2} textAnchor="middle" fontSize={11}
+                  fill={P.textDim} fontFamily={serif} fontStyle="italic">
+                  Enter quantities below to project completion
+                </text>
+              )}
+            </svg>
+          );
+        })()}
+      </div>
+
+      {/* Budget build-up chart */}
+      <div style={{ ...cardS, marginBottom: 12 }}>
+        <div style={{ fontFamily: serif, fontSize: 16, marginBottom: 14 }}>Budget <em>Build-up</em></div>
+        {(() => {
+          const chartW = 560, barH = 32;
+          const maxVal = Math.max(total * 1.08, CAP * 1.08);
+          const sc = v => (v / maxVal) * chartW;
+          const capX = sc(CAP);
+          // Build segments: confirmed + each proposed item with value
+          const segs = [{ label: "Confirmed Wk5", val: CONFIRMED_SPEND, color: P.gold }];
+          ACTION_PLAN_ITEMS.forEach(it => {
+            const v = (parseFloat(qtys[it.id]) || 0) * it.rate;
+            if (v > 0) segs.push({ label: it.name, val: v, color: it.group === "remaining" ? P.green : P.red });
+          });
+          let xCursor = 0;
+          const svgH = barH + 40;
+          return (
+            <svg viewBox={`0 0 ${chartW} ${svgH}`} style={{ width: "100%", height: "auto" }}>
+              {/* Background track */}
+              <rect x={0} y={0} width={chartW} height={barH} rx={4} fill="rgba(185,174,147,0.06)" />
+              {/* Over-cap zone */}
+              {total > CAP && <rect x={capX} y={0} width={chartW - capX} height={barH} rx={0} fill={hr(P.red, 0.08)} />}
+              {/* Segments */}
+              {segs.map((seg, i) => {
+                const x = xCursor;
+                const w = sc(seg.val);
+                xCursor += w;
+                return (
+                  <g key={i}>
+                    <rect x={x} y={0} width={w} height={barH}
+                      rx={i === 0 ? 4 : 0}
+                      fill={seg.color} opacity={i === 0 ? 0.85 : 0.75} />
+                    {w > 28 && (
+                      <text x={x + w / 2} y={barH / 2 + 4} textAnchor="middle"
+                        fontSize={8} fill={P.dark} fontFamily={sans} fontWeight={700} opacity={0.8}>
+                        €{Math.round(seg.val / 1000 * 10) / 10}k
+                      </text>
+                    )}
+                  </g>
+                );
+              })}
+              {/* Cap marker */}
+              <line x1={capX} y1={-4} x2={capX} y2={barH + 4} stroke={P.gold} strokeWidth={1.5} strokeDasharray="4,2" opacity={0.7} />
+              <text x={capX} y={barH + 14} textAnchor="middle" fontSize={8} fill={P.gold} fontFamily={sans}>€25k cap</text>
+              {/* Total marker */}
+              {proposed > 0 && (
+                <>
+                  <line x1={sc(total)} y1={-4} x2={sc(total)} y2={barH + 4}
+                    stroke={viable ? P.green : P.red} strokeWidth={1.5} opacity={0.8} />
+                  <text x={Math.min(sc(total), chartW - 30)} y={barH + 14} textAnchor="middle"
+                    fontSize={8} fill={viable ? P.green : P.red} fontFamily={serif} fontWeight={700}>
+                    €{Math.round(total).toLocaleString()}
+                  </text>
+                </>
+              )}
+              {/* Legend */}
+              <text x={0} y={svgH} fontSize={8} fill={P.creamDim} fontFamily={sans}>€0</text>
+            </svg>
+          );
+        })()}
+        {/* Segment legend */}
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 10, fontSize: 10 }}>
+          <span style={{ display: "flex", alignItems: "center", gap: 4, color: P.creamDim }}>
+            <span style={{ width: 10, height: 10, borderRadius: 2, background: P.gold, display: "inline-block" }} />
+            Confirmed Wk5
+          </span>
+          <span style={{ display: "flex", alignItems: "center", gap: 4, color: P.creamDim }}>
+            <span style={{ width: 10, height: 10, borderRadius: 2, background: P.green, display: "inline-block" }} />
+            Remaining items
+          </span>
+          <span style={{ display: "flex", alignItems: "center", gap: 4, color: P.creamDim }}>
+            <span style={{ width: 10, height: 10, borderRadius: 2, background: P.red, display: "inline-block" }} />
+            Hidden costs
+          </span>
+          {proposed === 0 && (
+            <span style={{ color: P.textDim, fontStyle: "italic" }}>— enter quantities below to see projection</span>
+          )}
+        </div>
+      </div>
+
       {/* Input table */}
       <div style={cardS}>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
@@ -882,20 +1058,29 @@ export default function App() {
           </div>
         </div>
 
-        {/* ── Tabs ── */}
-        <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
-          {TABS.map(t => (
-            <button key={t.id} onClick={() => setActiveTab(t.id)} style={{
-              padding: "8px 20px", borderRadius: 6, cursor: "pointer", fontFamily: sans,
-              fontSize: 12, fontWeight: 600, letterSpacing: 0.5, transition: "all 0.12s",
-              border: `1px solid ${activeTab === t.id ? P.gold : brd}`,
-              background: activeTab === t.id ? hr(P.gold, 0.15) : "rgba(32,32,20,0.4)",
-              color: activeTab === t.id ? P.gold : P.creamDim,
-            }}>
-              {t.label}
-            </button>
-          ))}
-        </div>
+        {/* ── Side nav + content grid ── */}
+        <div style={{ display: "grid", gridTemplateColumns: "148px 1fr", gap: 20, alignItems: "start" }}>
+
+          {/* Side tabs */}
+          <div style={{ position: "sticky", top: 24, display: "flex", flexDirection: "column", gap: 5 }}>
+            {TABS.map(t => (
+              <button key={t.id} onClick={() => setActiveTab(t.id)} style={{
+                display: "block", width: "100%", padding: "11px 14px",
+                borderRadius: 6, cursor: "pointer", fontFamily: sans,
+                fontSize: 12, fontWeight: 600, letterSpacing: 0.3,
+                textAlign: "left", transition: "all 0.12s",
+                border: `1px solid ${brd}`,
+                borderLeft: `3px solid ${activeTab === t.id ? P.gold : "transparent"}`,
+                background: activeTab === t.id ? hr(P.gold, 0.12) : "rgba(32,32,20,0.35)",
+                color: activeTab === t.id ? P.gold : P.creamDim,
+              }}>
+                {t.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Content area */}
+          <div>
 
         {/* ── Dashboard Tab ── */}
         {activeTab === "dashboard" && (
@@ -963,6 +1148,9 @@ export default function App() {
         {activeTab === "analysis"    && <AnalysisView />}
         {activeTab === "chart"       && <CostChartView cats={cats} />}
         {activeTab === "action-plan" && <ActionPlanView />}
+
+          </div>{/* end content area */}
+        </div>{/* end side nav grid */}
 
         <Rainbow height={4} style={{ marginTop: 24, opacity: 0.6 }} />
         <div style={{ marginTop: 14, textAlign: "center", paddingBottom: 36 }}>
